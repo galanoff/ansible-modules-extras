@@ -96,6 +96,11 @@ options:
       - The number of secondary IP addresses to assign to the network interface. This option is mutually exclusive of secondary_private_ip_addresses
     required: false
     version_added: 2.2
+  allow_reassignment:
+    description:
+      -  Indicates whether to allow an IP address that is already assigned to another network interface or instance to be reassigned to the specified network interface.
+    required: false
+    version_added: 2.3
 extends_documentation_fragment:
     - aws
     - ec2
@@ -167,6 +172,7 @@ EXAMPLES = '''
     private_ip_address: 172.31.0.20
     subnet_id: subnet-xxxxxxxx
     state: present
+    allow_reassignment: true
   register: eni
 
 # Modify the interface to enable the delete_on_terminaton flag
@@ -300,6 +306,7 @@ def create_eni(connection, vpc_id, module):
     security_groups = get_ec2_security_group_ids_from_names(module.params.get('security_groups'), connection, vpc_id=vpc_id, boto3=False)
     secondary_private_ip_addresses = module.params.get("secondary_private_ip_addresses")
     secondary_private_ip_address_count = module.params.get("secondary_private_ip_address_count")
+    allow_reassignment = module.params.get("allow_reassignment")
     changed = False
 
     try:
@@ -318,14 +325,14 @@ def create_eni(connection, vpc_id, module):
 
             if secondary_private_ip_address_count is not None:
                 try:
-                    connection.assign_private_ip_addresses(network_interface_id=eni.id, secondary_private_ip_address_count=secondary_private_ip_address_count)
+                    connection.assign_private_ip_addresses(network_interface_id=eni.id, secondary_private_ip_address_count=secondary_private_ip_address_count, allow_reassignment=allow_reassignment)
                 except BotoServerError:
                     eni.delete()
                     raise
 
             if secondary_private_ip_addresses is not None:
                 try:
-                    connection.assign_private_ip_addresses(network_interface_id=eni.id, private_ip_addresses=secondary_private_ip_addresses)
+                    connection.assign_private_ip_addresses(network_interface_id=eni.id, private_ip_addresses=secondary_private_ip_addresses, allow_reassignment=allow_reassignment)
                 except BotoServerError:
                     eni.delete()
                     raise
@@ -351,6 +358,7 @@ def modify_eni(connection, vpc_id, module, eni):
     delete_on_termination = module.params.get("delete_on_termination")
     secondary_private_ip_addresses = module.params.get("secondary_private_ip_addresses")
     secondary_private_ip_address_count = module.params.get("secondary_private_ip_address_count")
+    allow_reassignment = module.params.get("allow_reassignment")
     changed = False
 
     try:
@@ -377,12 +385,12 @@ def modify_eni(connection, vpc_id, module, eni):
             secondary_addresses_to_remove = list(set(current_secondary_addresses) - set(secondary_private_ip_addresses))
             if secondary_addresses_to_remove:
                 connection.unassign_private_ip_addresses(network_interface_id=eni.id, private_ip_addresses=list(set(current_secondary_addresses) - set(secondary_private_ip_addresses)), dry_run=False)
-            connection.assign_private_ip_addresses(network_interface_id=eni.id, private_ip_addresses=secondary_private_ip_addresses, secondary_private_ip_address_count=None, allow_reassignment=False, dry_run=False)
+            connection.assign_private_ip_addresses(network_interface_id=eni.id, private_ip_addresses=secondary_private_ip_addresses, secondary_private_ip_address_count=None, allow_reassignment=allow_reassignment, dry_run=False)
         if secondary_private_ip_address_count is not None:
             current_secondary_address_count = len(current_secondary_addresses)
 
             if secondary_private_ip_address_count > current_secondary_address_count:
-                connection.assign_private_ip_addresses(network_interface_id=eni.id, private_ip_addresses=None, secondary_private_ip_address_count=(secondary_private_ip_address_count - current_secondary_address_count), allow_reassignment=False, dry_run=False)
+                connection.assign_private_ip_addresses(network_interface_id=eni.id, private_ip_addresses=None, secondary_private_ip_address_count=(secondary_private_ip_address_count - current_secondary_address_count), allow_reassignment=allow_reassignment, dry_run=False)
                 changed = True
             elif secondary_private_ip_address_count < current_secondary_address_count:
                 # How many of these addresses do we want to remove
@@ -514,6 +522,7 @@ def main():
             source_dest_check=dict(default=None, type='bool'),
             delete_on_termination=dict(default=None, type='bool'),
             secondary_private_ip_addresses=dict(default=None, type='list'),
+            allow_reassignment=dict(default=False, type='bool'),
             secondary_private_ip_address_count=dict(default=None, type='int'),
             attached=dict(default=None, type='bool')
         )
